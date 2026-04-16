@@ -1,0 +1,57 @@
+{
+  "name": "autosar-arxml-explorer",
+  "displayName": "AUTOSAR ARXML Explorer",
+  "description": "Semantic AUTOSAR ARXML explorer with custom editor, indexing, and relationship navigation.",
+  "version": "0.0.1",
+  "publisher": "local",
+  "license": "UNLICENSED",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished",
+    "onCustomEditor:autosarArxml.editor"
+  ],
+  "main": "./dist/extension/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "autosarArxml.openPreview",
+        "title": "AUTOSAR: Open Semantic Preview"
+      },
+      {
+        "command": "autosarArxml.rebuildIndex",
+        "title": "AUTOSAR: Rebuild ARXML Index"
+      }
+    ],
+    "customEditors": [
+      {
+        "viewType": "autosarArxml.editor",
+        "displayName": "AUTOSAR ARXML Editor",
+        "selector": [
+          {
+            "filenamePattern": "*.arxml"
+          }
+        ],
+        "priority": "default"
+      }
+    ]
+  },
+  "scripts": {
+    "build": "npm run build:webview && tsc -p .",
+    "build:webview": "cd src/webview/app && npm install && npm run build",
+    "watch": "tsc -w -p .",
+    "dev:webview": "cd src/webview/app && npm run dev"
+  },
+  "dependencies": {
+    "fast-xml-parser": "^4.5.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/vscode": "^1.90.0",
+    "typescript": "^5.7.2"
+  }
+}

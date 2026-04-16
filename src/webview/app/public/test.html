@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AUTOSAR ARXML Explorer - Test</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: ui-sans-serif, system-ui, sans-serif;
+      margin: 0;
+      padding: 20px;
+      background: linear-gradient(180deg, #0f172a 0%, #111827 100%);
+      color: #e5e7eb;
+      min-height: 100vh;
+    }
+    h1 { color: #38bdf8; margin-bottom: 20px; }
+    h2 { color: #94a3b8; font-size: 14px; text-transform: uppercase; letter-spacing: 1px; }
+    .panel {
+      background: rgba(17, 24, 39, 0.84);
+      border: 1px solid #334155;
+      border-radius: 12px;
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+    .controls { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 20px; }
+    button {
+      padding: 10px 20px;
+      background: #38bdf8;
+      color: #0f172a;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      font-weight: 600;
+    }
+    button:hover { background: #0ea5e9; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    input[type="file"] { display: none; }
+    .file-btn {
+      padding: 10px 20px;
+      background: #1f2937;
+      color: #e5e7eb;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+    .file-btn:hover { background: #374151; }
+    #output {
+      background: #0f0f23;
+      padding: 15px;
+      border-radius: 8px;
+      max-height: 300px;
+      overflow-y: auto;
+      font-family: ui-monospace, monospace;
+      font-size: 12px;
+    }
+    .msg { margin: 5px 0; padding: 8px; border-radius: 4px; white-space: pre-wrap; word-break: break-all; }
+    .sent { background: #1e3a5f; }
+    .received { background: #2d4a2d; }
+    .error { background: #5f1e1e; color: #fca5a5; }
+    .success { background: #1e3a5f; color: #93c5fd; }
+
+    #app { display: none; }
+    .tree, .detail { margin-top: 10px; }
+    .tree-item { padding: 6px 10px; margin: 2px 0; background: rgba(30, 41, 59, 0.5); border-radius: 6px; cursor: pointer; }
+    .tree-item:hover { background: rgba(56, 189, 248, 0.2); }
+    .tree-item.selected { background: rgba(56, 189, 248, 0.3); border-left: 3px solid #38bdf8; }
+    .prop { display: flex; gap: 10px; padding: 4px 8px; background: rgba(30, 41, 59, 0.5); margin: 2px 0; border-radius: 4px; font-size: 13px; }
+    .prop-key { color: #38bdf8; min-width: 120px; }
+    .prop-value { color: #e5e7eb; word-break: break-all; }
+    .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  </style>
+</head>
+<body>
+  <h1>AUTOSAR ARXML Explorer - Test</h1>
+  <p style="color: #94a3b8; margin-bottom: 20px;">Open ARXML files in browser for testing</p>
+
+  <div class="controls">
+    <label class="file-btn">
+      📁 Open ARXML File
+      <input type="file" accept=".arxml,.xml" id="fileInput" />
+    </label>
+    <button onclick="loadSample()">Load Sample ARXML</button>
+    <button onclick="toggleDebug()">Toggle Debug View</button>
+  </div>
+
+  <div class="two-col">
+    <div class="panel">
+      <h2>File Tree</h2>
+      <div id="tree" class="tree">No file loaded</div>
+    </div>
+    <div class="panel">
+      <h2>Node Detail</h2>
+      <div id="detail">Select a node to view details</div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Messages</h2>
+    <div id="output"></div>
+  </div>
+
+  <div id="app"></div>
+
+  <script type="module">
+    import { createApp } from '/src/main.tsx';
+
+    let debugMode = true;
+    let currentData = null;
+    let selectedNodeId = null;
+
+    // Mock VSCode API
+    window.vscode = {
+      postMessage: (msg) => {
+        logMessage('SENT', msg);
+        handleMessage(msg);
+      },
+      getState: () => ({}),
+      setState: () => {}
+    };
+
+    function logMessage(dir, msg) {
+      if (!debugMode) return;
+      const output = document.getElementById('output');
+      const div = document.createElement('div');
+      div.className = 'msg ' + (dir === 'SENT' ? 'sent' : 'received');
+      div.textContent = `${dir}: ${JSON.stringify(msg, null, 2)}`;
+      output.appendChild(div);
+      output.scrollTop = output.scrollHeight;
+    }
+
+    window.toggleDebug = () => {
+      debugMode = !debugMode;
+      document.getElementById('output').style.display = debugMode ? 'block' : 'none';
+    };
+
+    // File loading
+    const fileInput = document.getElementById('fileInput');
+    fileInput.addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const content = await file.text();
+      logMessage('INFO', `Loaded file: ${file.name} (${content.length} bytes)`);
+      parseAndDisplay(content);
+    });
+
+    window.loadSample = () => {
+      const sample = `<?xml version="1.0" encoding="UTF-8"?>
+<AUTOSAR xmlns="http://autosar.org/schema/R4.2.2">
+  <AR-PACKAGES>
+    <AR-PACKAGE>
+      <SHORT-NAME>CanPkg</SHORT-NAME>
+      <ELEMENTS>
+        <CAN-CONFIG>
+          <SHORT-NAME>CanConfig</SHORT-NAME>
+          <CAN-CHANNEL>
+            <SHORT-NAME>CanChannel1</SHORT-NAME>
+            <CAN controller="CanController1"/>
+          </CAN-CHANNEL>
+          <CAN-CONTROLLER>
+            <SHORT-NAME>CanController1</SHORT-NAME>
+            <CanIfControllerId>0</CanIfControllerId>
+          </CAN-CONTROLLER>
+        </CAN-CONFIG>
+        <CANIF-CONFIG>
+          <SHORT-NAME>CanIfConfig</SHORT-NAME>
+          <CANIF-CHANNEL>
+            <SHORT-NAME>CanIfChannel</SHORT-NAME>
+            <CanIfCanIfHrhRef dest="CAN-HRH">/CanPkg/CanConfig/CanChannel1/Hrh</CanIfCanIfHrhRef>
+          </CANIF-CHANNEL>
+        </CANIF-CONFIG>
+      </ELEMENTS>
+    </AR-PACKAGE>
+    <AR-PACKAGE>
+      <SHORT-NAME>ComPkg</SHORT-NAME>
+      <ELEMENTS>
+        <COM-MODULE>
+          <SHORT-NAME>ComConfig</SHORT-NAME>
+          <COM-IPDU>
+            <SHORT-NAME>ComIPDU</SHORT-NAME>
+            <ComPduId>0</ComPduId>
+          </COM-IPDU>
+        </COM-MODULE>
+      </ELEMENTS>
+    </AR-PACKAGE>
+  </AR-PACKAGES>
+</AUTOSAR>`;
+      logMessage('INFO', 'Loaded sample ARXML');
+      parseAndDisplay(sample);
+    };
+
+    function parseAndDisplay(xmlContent) {
+      // Simple XML parser for demo
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(xmlContent, 'text/xml');
+
+      // Extract nodes
+      const nodes = [];
+      const references = [];
+      let nodeId = 0;
+
+      function processNode(element, parentPath = '') {
+        const tagName = element.nodeName;
+        const shortName = element.querySelector('SHORT-NAME')?.textContent || '';
+        const path = parentPath + '/' + (shortName || tagName);
+        const id = `node-${nodeId++}`;
+
+        const node = {
+          id,
+          label: shortName || tagName,
+          type: tagName,
+          module: detectModule(tagName, path),
+          path,
+          children: []
+        };
+        nodes.push(node);
+
+        // Process children
+        Array.from(element.children).forEach(child => {
+          if (child.nodeName === 'SHORT-NAME') return;
+          const childNode = processNode(child, path);
+          if (childNode) {
+            node.children.push(childNode.id);
+          }
+        });
+
+        // Extract references (elements ending with -REF or -IREF)
+        if (tagName.endsWith('-REF') || tagName.endsWith('-TREF') || tagName.endsWith('-IREF')) {
+          references.push({
+            sourceId: parentPath,
+            targetRef: element.textContent,
+            type: tagName
+          });
+        }
+
+        return node;
+      }
+
+      // Start processing
+      const root = doc.documentElement;
+      processNode(root);
+
+      // Build tree structure
+      const nodeMap = new Map(nodes.map(n => [n.id, n]));
+
+      function buildTree(nodeId) {
+        const node = nodeMap.get(nodeId);
+        if (!node) return null;
+        return {
+          id: node.id,
+          label: node.label,
+          type: node.type,
+          children: node.children.map(buildTree).filter(Boolean)
+        };
+      }
+
+      // Get root nodes (nodes that are not children of other nodes)
+      const allChildIds = new Set();
+      nodes.forEach(n => n.children.forEach(cid => allChildIds.add(cid)));
+      const rootNodes = nodes.filter(n => !allChildIds.has(n.id)).map(buildTree);
+
+      currentData = { nodes, nodeMap, rootNodes, references };
+
+      renderTree();
+      logMessage('SUCCESS', `Parsed: ${nodes.length} nodes, ${references.length} references`);
+    }
+
+    function detectModule(tagName, path) {
+      const text = (tagName + ' ' + path).toLowerCase();
+      if (text.includes('canif')) return 'CanIf';
+      if (text.includes('can')) return 'Can';
+      if (text.includes('dcm')) return 'Dcm';
+      if (text.includes('pdur')) return 'PduR';
+      if (text.includes('com')) return 'Com';
+      if (text.includes('dem')) return 'Dem';
+      if (text.includes('ecuc')) return 'EcuC';
+      return 'Unknown';
+    }
+
+    function renderTree() {
+      const container = document.getElementById('tree');
+      if (!currentData) return;
+
+      container.innerHTML = '';
+
+      function renderNode(node, depth = 0) {
+        const div = document.createElement('div');
+        div.className = 'tree-item' + (node.id === selectedNodeId ? ' selected' : '');
+        div.style.paddingLeft = (depth * 16 + 8) + 'px';
+        div.innerHTML = `<span>${node.label}</span><span style="color:#94a3b8;font-size:11px;margin-left:8px">(${node.type})</span>`;
+        div.onclick = () => selectNode(node.id);
+        container.appendChild(div);
+        if (node.children) {
+          node.children.forEach(child => renderNode(child, depth + 1));
+        }
+      }
+
+      currentData.rootNodes.forEach(root => renderNode(root));
+    }
+
+    function selectNode(nodeId) {
+      selectedNodeId = nodeId;
+      const node = currentData?.nodeMap.get(nodeId);
+      if (!node) return;
+
+      const detail = document.getElementById('detail');
+      detail.innerHTML = `
+        <div style="margin-bottom:12px">
+          <strong style="font-size:18px">${node.label}</strong>
+          <div style="color:#94a3b8;font-size:12px;margin-top:4px">${node.type} • ${node.module}</div>
+          <div style="color:#64748b;font-size:11px;margin-top:2px;font-family:monospace">${node.path}</div>
+        </div>
+        <div style="font-size:12px;color:#94a3b8;text-transform:uppercase;margin-bottom:8px">Properties</div>
+        ${Object.entries(node).filter(([k]) => !['id','label','type','module','path','children'].includes(k))
+          .map(([k,v]) => `<div class="prop"><span class="prop-key">${k}</span><span class="prop-value">${v}</span></div>`).join('')}
+      `;
+
+      renderTree();
+      vscode.postMessage({ type: 'SELECT_NODE', nodeId });
+    }
+
+    // Make functions global
+    window.selectNode = selectNode;
+
+    // Initial sample load
+    loadSample();
+
+    // Mount React app
+    // createApp(document.getElementById('app'));
+  </script>
+</body>
+</html>
