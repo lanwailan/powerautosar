@@ -4,6 +4,7 @@ import { ArxmlCustomEditorProvider } from './editor/arxmlCustomEditorProvider';
 import { createDefaultParser } from './services/parser/parserFactory';
 import { WorkspaceScanner } from './services/workspace/workspaceScanner';
 import { WorkspaceIndexService } from './services/index/workspaceIndexService';
+import { ExtensionViewProvider } from './views/extensionViewProvider';
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   console.log('[AUTOSAR] Extension activating...');
@@ -32,6 +33,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     )
   );
   console.log('[AUTOSAR] Custom editor provider registered');
+
+  // Register extension view in activity bar
+  const extensionViewProvider = new ExtensionViewProvider(indexService);
+  context.subscriptions.push(
+    vscode.window.registerWebviewViewProvider(
+      'autosarExplorerTree',
+      extensionViewProvider
+    )
+  );
+  console.log('[AUTOSAR] Extension view provider registered');
 
   context.subscriptions.push(
     vscode.commands.registerCommand('autosarArxml.rebuildIndex', async () => {

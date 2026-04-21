@@ -27,6 +27,24 @@
         "title": "AUTOSAR: Rebuild ARXML Index"
       }
     ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "autosarExplorer",
+          "title": "AUTOSAR",
+          "icon": "$(symbol-property)"
+        }
+      ]
+    },
+    "views": {
+      "autosarExplorer": [
+        {
+          "id": "autosarExplorerTree",
+          "type": "webview",
+          "name": "Explorer"
+        }
+      ]
+    },
     "customEditors": [
       {
         "viewType": "autosarArxml.editor",

@@ -57,7 +57,7 @@ export function App() {
   } = useEditorStore();
 
   const { sendReady, selectNode, openRawXml } = useVscode();
-  const [leftTab, setLeftTab] = useState<'ar-tree' | 'ecu-conf' | 'search'>('ar-tree');
+  const [leftTab, setLeftTab] = useState<'ar-tree' | 'ecu-conf' | 'search' | 'extension'>('ar-tree');
   const [consoleTab, setConsoleTab] = useState<'console' | 'problems' | 'output'>('console');
 
   // Initialize on mount - send READY to extension after a short delay

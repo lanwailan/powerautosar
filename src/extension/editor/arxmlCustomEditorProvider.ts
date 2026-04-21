@@ -7,6 +7,7 @@ import { ExtensionEvent, WebviewRequest } from '../protocol/messages';
 import { NavigationService } from '../services/navigation/navigationService';
 import { WorkspaceIndexService } from '../services/index/workspaceIndexService';
 import { WebviewMessageRouter } from './webviewMessageRouter';
+import { NormalizedArxmlNode } from '../models/normalizedNode';
 
 export class ArxmlCustomEditorProvider implements vscode.CustomReadonlyEditorProvider {
   static readonly viewType = 'autosarArxml.editor';
@@ -161,12 +162,32 @@ export class ArxmlCustomEditorProvider implements vscode.CustomReadonlyEditorPro
     const nodes = this.indexService.getNodesByFile(fileUri);
     const nodeMap = new Map(nodes.map((node) => [node.id, node]));
 
-    // Skip structural container types
-    const skipTypes = new Set(['AR-PACKAGES', 'ELEMENTS', 'SUB-CONTAINERS', 'PARAMETER-VALUES', 'REFERENCE-VALUES', 'PHYSICAL-CHANNELS', 'FRAME-TRIGGERINGS', 'I-SIGNAL-TRIGGERINGS', 'PDU-TRIGGERINGS', 'CONTAINERS']);
+    // Skip structural container types - these don't appear in the tree but contain children
+    const skipTypes = new Set([
+      'AR-PACKAGES', 'ELEMENTS', 'SUB-CONTAINERS', 'PARAMETER-VALUES',
+      'REFERENCE-VALUES', 'PHYSICAL-CHANNELS', 'FRAME-TRIGGERINGS',
+      'I-SIGNAL-TRIGGERINGS', 'PDU-TRIGGERINGS', 'CONTAINERS'
+    ]);
 
-    // Only show nodes that have a SHORT-NAME (meaningful content) - not skipTypes and displayName != type
-    const isMeaningfulNode = (node: { type: string; displayName: string }) =>
-      !skipTypes.has(node.type) && node.displayName !== node.type;
+    // A node is "meaningful" if:
+    // 1. It's not a skip type
+    // 2. It has a SHORT-NAME (displayName !== type), OR it's a leaf node with values
+    const isMeaningfulNode = (node: NormalizedArxmlNode): boolean => {
+      if (skipTypes.has(node.type)) return false;
+
+      // Has SHORT-NAME - this is a content node
+      if (node.shortName) return true;
+
+      // No children and has attributes - might be a value node
+      if (node.childIds.length === 0 && Object.keys(node.attributes).length > 0) {
+        return true;
+      }
+
+      // Display name differs from type (means it has a shortName that was used)
+      if (node.displayName !== node.type) return true;
+
+      return false;
+    };
 
     // Build child map for all nodes
     const nodeChildren = new Map<string, string[]>();
@@ -174,78 +195,58 @@ export class ArxmlCustomEditorProvider implements vscode.CustomReadonlyEditorPro
       nodeChildren.set(node.id, node.childIds);
     }
 
-    // For each node, find its meaningful children
-    const getMeaningfulChildren = (nodeId: string): string[] => {
+    // Get all children of a node, flattening through skip types
+    const getAllChildren = (nodeId: string): string[] => {
       const childIds = nodeChildren.get(nodeId) || [];
-      const meaningful: string[] = [];
+      const result: string[] = [];
       for (const childId of childIds) {
         const child = nodeMap.get(childId);
         if (!child) continue;
-
-        if (isMeaningfulNode(child)) {
-          meaningful.push(childId);
+        if (skipTypes.has(child.type)) {
+          // Flatten - add grandchildren
+          result.push(...getAllChildren(childId));
         } else {
-          // Recursively get meaningful children from this non-meaningful node
-          meaningful.push(...getMeaningfulChildren(childId));
+          result.push(childId);
         }
       }
-      return meaningful;
+      return result;
     };
 
-    // Find root nodes (nodes whose parents are not meaningful or are roots)
-    const rootIds = new Set<string>();
+    // Find root nodes
     const childOf = new Set<string>();
     for (const node of nodes) {
       for (const childId of node.childIds) {
         childOf.add(childId);
       }
     }
-    for (const node of nodes) {
-      if (!childOf.has(node.id)) {
-        rootIds.add(node.id);
-      }
-    }
+    const rootIds = nodes.filter(node => !childOf.has(node.id)).map(n => n.id);
 
     // Build tree recursively
     const toTree = (nodeId: string): TreeNodeDto | undefined => {
       const node = nodeMap.get(nodeId);
       if (!node) return undefined;
 
-      const meaningfulChildren = getMeaningfulChildren(nodeId);
+      const children = getAllChildren(nodeId);
 
       return {
         id: node.id,
         label: node.displayName,
         type: node.type,
-        children: meaningfulChildren
-          .map((childId) => toTree(childId))
+        children: children
+          .filter(childId => {
+            const child = nodeMap.get(childId);
+            return child && isMeaningfulNode(child);
+          })
+          .map(childId => toTree(childId))
           .filter((entry): entry is TreeNodeDto => Boolean(entry)),
       };
     };
 
-    // Start from roots and collect all top-level meaningful nodes
+    // Start from roots
     const result: TreeNodeDto[] = [];
-    const visited = new Set<string>();
-
-    const collectRoots = (nodeId: string) => {
-      if (visited.has(nodeId)) return;
-      visited.add(nodeId);
-
-      const node = nodeMap.get(nodeId);
-      if (!node) return;
-
-      if (isMeaningfulNode(node)) {
-        result.push(toTree(nodeId)!);
-      } else {
-        const children = getMeaningfulChildren(nodeId);
-        for (const childId of children) {
-          collectRoots(childId);
-        }
-      }
-    };
-
     for (const rootId of rootIds) {
-      collectRoots(rootId);
+      const tree = toTree(rootId);
+      if (tree) result.push(tree);
     }
 
     return result;
